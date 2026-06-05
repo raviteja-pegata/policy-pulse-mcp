@@ -10,6 +10,8 @@ def ttl_cache(ttl_seconds: int = 300) -> Callable:
 
         @functools.wraps(func)
         async def wrapper(obj: Any, *args: Any, **kwargs: Any) -> Any:
+            # id(obj) scopes the cache to the instance, not the class, so each adapter
+            # (e.g. two GatekeeperAdapters pointing at different clusters) has independent entries.
             key = (id(obj), args, tuple(sorted(kwargs.items())))
             if key in _cache:
                 value, expiry = _cache[key]

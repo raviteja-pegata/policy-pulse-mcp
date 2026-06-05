@@ -2,6 +2,8 @@ import os
 
 
 def build_azure_credential():
+    # All azure.identity imports are inside the function body so the package stays importable
+    # without azure-identity installed (e.g. when only the static manifest gate is used).
     cred_type = os.environ.get("AZURE_CREDENTIAL_TYPE", "auto").lower()
 
     if cred_type == "cli":

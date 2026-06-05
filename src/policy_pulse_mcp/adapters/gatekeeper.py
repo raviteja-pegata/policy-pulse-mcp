@@ -82,6 +82,9 @@ class GatekeeperAdapter:
             logger.debug("Could not list ConstraintTemplates: %s", exc)
             return violations
 
+        # Gatekeeper creates one CRD per ConstraintTemplate under constraints.gatekeeper.sh.
+        # The Kubernetes API has no way to list across all CRDs in a group with an empty plural,
+        # so we must query each template's CRD individually using the template name as the plural.
         for template in templates.get("items", []):
             plural = template["metadata"]["name"]
             try:

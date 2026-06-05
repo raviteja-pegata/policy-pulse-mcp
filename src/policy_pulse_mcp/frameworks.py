@@ -1,4 +1,9 @@
-"""Control catalog — 9 controls mapped to CIS Kubernetes, PCI-DSS, NIST 800-53, and SOC 2."""
+"""Control catalog — 9 controls mapped to CIS Kubernetes, PCI-DSS, NIST 800-53, and SOC 2.
+
+Each entry serves two purposes from one definition:
+  - enrich()         keyword-matches live violations → attaches framework refs at runtime
+  - evaluator.gate() runs manifest_check predicates → static pre-deploy analysis, no cluster needed
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass

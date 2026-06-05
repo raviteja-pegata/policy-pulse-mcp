@@ -77,6 +77,9 @@ class KyvernoAdapter:
         api = client.CustomObjectsApi()
         violations: list[Violation] = []
 
+        # Kyverno 1.10+ promoted ClusterPolicyReport from v1alpha2 to v1.
+        # We try v1 first so newer clusters work out of the box, then fall back to v1alpha2
+        # for clusters still running older Kyverno versions.
         reports = None
         for version in ("v1", "v1alpha2"):
             try:

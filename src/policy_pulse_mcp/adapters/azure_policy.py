@@ -15,6 +15,11 @@ _COMPLIANCE_MAP = {
 
 
 def _fetch_display_names(credential, names: set[str]) -> dict[str, str]:
+    # Azure Policy built-in policy definition names are GUIDs (e.g. "245fc9df-...").
+    # Without human-readable display names, the keyword enrichment in frameworks.enrich()
+    # can't map violations to CIS/NIST/PCI-DSS controls.
+    # We use urllib (stdlib) + a bearer token instead of azure-mgmt-policy because
+    # that SDK package does not exist as a stable PyPI release.
     import json
     import urllib.request
 

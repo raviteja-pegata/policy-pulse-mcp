@@ -8,10 +8,14 @@ from . import frameworks, intelligence
 from .evaluator import gate
 from .models import Severity
 
+# stream=sys.stderr is required: MCP uses stdout for JSON-RPC, so any log line on stdout
+# corrupts the protocol stream and causes the client to drop the connection.
 logging.basicConfig(
     level=os.environ.get("POLICYPULSE_LOG", "INFO"),
     stream=sys.stderr,
 )
+# Azure SDK logs INFO-level credential probe attempts on every startup, which are noise.
+# They try env vars → managed identity → CLI in order — all expected, not errors.
 logging.getLogger("azure.identity").setLevel(logging.WARNING)
 logging.getLogger("azure.core").setLevel(logging.WARNING)
 logging.getLogger("azure.mgmt").setLevel(logging.WARNING)
@@ -89,6 +93,9 @@ def _build_adapters() -> list:
     return adapters
 
 
+# Module-level initialization is intentional: POLICYPULSE_DEMO must be read once at import
+# time so that integration tests can set it before importing this module and get mock adapters.
+# If _build_adapters() were called lazily inside each tool, demo mode would not be consistent.
 _ADAPTERS = _build_adapters()
 
 
