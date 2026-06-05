@@ -37,6 +37,7 @@ class Violation:
     severity: Severity
     framework_refs: list[FrameworkRef] = field(default_factory=list)
     raw: dict = field(default_factory=dict)
+    cluster: Optional[str] = None
 
 
 @dataclass

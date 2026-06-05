@@ -24,28 +24,57 @@ DEMO_MODE = os.environ.get("POLICYPULSE_DEMO", "").lower() == "true"
 _severity_order = {s: i for i, s in enumerate(Severity)}
 
 
+def _parse_clusters() -> list[tuple[str, str]]:
+    """Parse POLICYPULSE_CLUSTERS=label1:context1,label2:context2 into [(label, context), ...]."""
+    raw = os.environ.get("POLICYPULSE_CLUSTERS", "").strip()
+    if not raw:
+        return []
+    clusters = []
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if ":" in entry:
+            label, _, context = entry.partition(":")
+            clusters.append((label.strip(), context.strip()))
+        else:
+            clusters.append((entry, entry))
+    return clusters
+
+
 def _build_adapters() -> list:
     if DEMO_MODE:
         from .demo import MockAzurePolicyAdapter, MockGatekeeperAdapter, MockKyvernoAdapter
         return [MockGatekeeperAdapter(), MockKyvernoAdapter(), MockAzurePolicyAdapter()]
 
     adapters = []
+    clusters = _parse_clusters()
 
-    try:
+    if clusters:
         from .adapters.gatekeeper import GatekeeperAdapter
-        a = GatekeeperAdapter()
-        if a.is_available():
-            adapters.append(a)
-    except Exception as exc:
-        logger.debug("Gatekeeper unavailable: %s", exc)
-
-    try:
         from .adapters.kyverno import KyvernoAdapter
-        a = KyvernoAdapter()
-        if a.is_available():
-            adapters.append(a)
-    except Exception as exc:
-        logger.debug("Kyverno unavailable: %s", exc)
+        for label, context in clusters:
+            for cls in (GatekeeperAdapter, KyvernoAdapter):
+                try:
+                    a = cls(cluster_label=label, context=context)
+                    if a.is_available():
+                        adapters.append(a)
+                except Exception as exc:
+                    logger.debug("%s unavailable for cluster %s: %s", cls.__name__, label, exc)
+    else:
+        try:
+            from .adapters.gatekeeper import GatekeeperAdapter
+            a = GatekeeperAdapter()
+            if a.is_available():
+                adapters.append(a)
+        except Exception as exc:
+            logger.debug("Gatekeeper unavailable: %s", exc)
+
+        try:
+            from .adapters.kyverno import KyvernoAdapter
+            a = KyvernoAdapter()
+            if a.is_available():
+                adapters.append(a)
+        except Exception as exc:
+            logger.debug("Kyverno unavailable: %s", exc)
 
     sub_id = os.environ.get("AZURE_SUBSCRIPTION_ID")
     if sub_id:
@@ -78,7 +107,13 @@ def _connection_hints(connected: set[str]) -> list[str]:
         if not os.environ.get("AZURE_SUBSCRIPTION_ID"):
             hints.append("AZURE_SUBSCRIPTION_ID not set — Azure Policy engine skipped.")
         else:
-            hints.append("Azure Policy failed to connect — check credentials with 'az login'.")
+            cred_type = os.environ.get("AZURE_CREDENTIAL_TYPE", "auto")
+            if cred_type == "service_principal":
+                missing = [v for v in ("AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET") if not os.environ.get(v)]
+                if missing:
+                    hints.append(f"service_principal auth missing: {', '.join(missing)}")
+            else:
+                hints.append("Azure Policy failed to connect — check credentials with 'az login'.")
     return hints
 
 
@@ -95,11 +130,19 @@ async def cluster_status() -> dict:
     ]
     connected = {e["engine"] for e in engines}
     hints = [] if DEMO_MODE else _connection_hints(connected)
+
+    clusters = _parse_clusters()
+    fleet = None
+    if clusters:
+        fleet = [{"label": label, "context": context} for label, context in clusters]
+
     return {
         "demo_mode": DEMO_MODE,
         "demo_banner": "DEMO MODE — using mock data, no cluster required." if DEMO_MODE else None,
         "connected_engines": engines,
         "engine_count": len(engines),
+        "azure_credential_type": os.environ.get("AZURE_CREDENTIAL_TYPE", "auto"),
+        "fleet": fleet,
         "hints": hints or None,
     }
 
@@ -133,12 +176,14 @@ async def get_violations(
     namespace: str | None = None,
     engine: str | None = None,
     min_severity: str | None = None,
+    cluster: str | None = None,
 ) -> dict:
     """All active violations enriched with compliance framework refs.
 
     namespace: restrict to a specific Kubernetes namespace.
     engine: one of gatekeeper, kyverno, azure_policy.
     min_severity: only return violations at or above this level (critical → info).
+    cluster: restrict to a specific cluster label (multi-cluster mode only).
     """
     violations = []
     for adapter in _ADAPTERS:
@@ -152,6 +197,9 @@ async def get_violations(
 
     if namespace:
         violations = [v for v in violations if v.namespace == namespace]
+
+    if cluster:
+        violations = [v for v in violations if v.cluster == cluster]
 
     if min_severity:
         try:
@@ -170,6 +218,7 @@ async def get_violations(
                 "policy": v.policy_name,
                 "resource": f"{v.resource_kind}/{v.resource_name}",
                 "namespace": v.namespace,
+                "cluster": v.cluster,
                 "severity": v.severity.value,
                 "message": v.message,
                 "framework_refs": [

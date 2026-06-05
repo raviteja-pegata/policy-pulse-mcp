@@ -1,7 +1,8 @@
-"""Azure Policy adapter — PolicyInsightsClient + DefaultAzureCredential."""
+"""Azure Policy adapter — PolicyInsightsClient + credential from credentials.py."""
 import logging
 
 from ..cache import ttl_cache
+from ..credentials import build_azure_credential
 from ..models import Engine, Policy, Severity, Violation
 
 logger = logging.getLogger(__name__)
@@ -49,10 +50,7 @@ class AzurePolicyAdapter:
     def is_available(self) -> bool:
         if self._available is None:
             try:
-                from azure.identity import DefaultAzureCredential  # type: ignore[import-untyped]
-                from azure.mgmt.policyinsights import PolicyInsightsClient  # type: ignore[import-untyped]
-
-                DefaultAzureCredential()
+                build_azure_credential()
                 self._available = True
             except Exception:
                 self._available = False
@@ -60,10 +58,9 @@ class AzurePolicyAdapter:
 
     @ttl_cache(ttl_seconds=600)
     async def list_policies(self) -> list[Policy]:
-        from azure.identity import DefaultAzureCredential  # type: ignore[import-untyped]
         from azure.mgmt.policy import PolicyClient  # type: ignore[import-untyped]
 
-        cred = DefaultAzureCredential()
+        cred = build_azure_credential()
         client = PolicyClient(cred, self.subscription_id)
         policies = []
         for defn in client.policy_definitions.list():
@@ -80,10 +77,9 @@ class AzurePolicyAdapter:
 
     @ttl_cache(ttl_seconds=600)
     async def get_violations(self) -> list[Violation]:
-        from azure.identity import DefaultAzureCredential  # type: ignore[import-untyped]
         from azure.mgmt.policyinsights import PolicyInsightsClient  # type: ignore[import-untyped]
 
-        cred = DefaultAzureCredential()
+        cred = build_azure_credential()
         insights = PolicyInsightsClient(cred, self.subscription_id)
 
         raw_states = [

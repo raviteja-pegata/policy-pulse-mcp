@@ -16,3 +16,15 @@ def load_kube_config() -> None:
     else:
         kubeconfig = os.environ.get("KUBECONFIG", "~/.kube/config")
         config.load_kube_config(config_file=os.path.expanduser(kubeconfig))
+
+
+def load_kube_config_for_context(context: str) -> None:
+    try:
+        from kubernetes import config  # type: ignore[import-untyped]
+    except ImportError as exc:
+        raise RuntimeError(
+            "kubernetes package not installed. Run: pip install policy-pulse-mcp[kubernetes]"
+        ) from exc
+
+    kubeconfig = os.environ.get("KUBECONFIG", "~/.kube/config")
+    config.load_kube_config(config_file=os.path.expanduser(kubeconfig), context=context)

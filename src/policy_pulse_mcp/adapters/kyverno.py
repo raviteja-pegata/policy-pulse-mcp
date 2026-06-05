@@ -2,7 +2,7 @@
 import logging
 
 from ..cache import ttl_cache
-from ..cluster import load_kube_config
+from ..cluster import load_kube_config, load_kube_config_for_context
 from ..models import Engine, Policy, Severity, Violation
 
 logger = logging.getLogger(__name__)
@@ -19,13 +19,21 @@ _RESULT_MAP = {
 class KyvernoAdapter:
     engine = Engine.KYVERNO
 
-    def __init__(self) -> None:
+    def __init__(self, cluster_label: str | None = None, context: str | None = None) -> None:
+        self.cluster_label = cluster_label
+        self.context = context
         self._available: bool | None = None
+
+    def _load_config(self) -> None:
+        if self.context:
+            load_kube_config_for_context(self.context)
+        else:
+            load_kube_config()
 
     def is_available(self) -> bool:
         if self._available is None:
             try:
-                load_kube_config()
+                self._load_config()
                 self._available = True
             except Exception:
                 self._available = False
@@ -35,7 +43,7 @@ class KyvernoAdapter:
     async def list_policies(self) -> list[Policy]:
         from kubernetes import client  # type: ignore[import-untyped]
 
-        load_kube_config()
+        self._load_config()
         api = client.CustomObjectsApi()
         items = api.list_cluster_custom_object(
             group="kyverno.io",
@@ -65,7 +73,7 @@ class KyvernoAdapter:
     async def get_violations(self) -> list[Violation]:
         from kubernetes import client  # type: ignore[import-untyped]
 
-        load_kube_config()
+        self._load_config()
         api = client.CustomObjectsApi()
         violations: list[Violation] = []
 
@@ -103,6 +111,7 @@ class KyvernoAdapter:
                         message=result.get("message", ""),
                         severity=sev,
                         raw=result,
+                        cluster=self.cluster_label,
                     )
                 )
 
