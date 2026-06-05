@@ -628,26 +628,20 @@ For clusters using local RBAC instead of Azure RBAC, see [Step 2 of Workload Ide
 
 ## Installation
 
-**From source (current):**
+```bash
+pip install policy-pulse-mcp                      # core only (demo + static gate)
+pip install "policy-pulse-mcp[kubernetes]"        # + Gatekeeper + Kyverno
+pip install "policy-pulse-mcp[azure]"             # + Azure Policy
+pip install "policy-pulse-mcp[all]"               # everything
+```
+
+**From source:**
 
 ```bash
 git clone https://github.com/raviteja-pegata/policy-pulse-mcp
 cd policy-pulse-mcp
 python -m venv .venv && source .venv/bin/activate
-
-pip install -e "."          # core only (demo + static gate)
-pip install -e ".[kubernetes]"  # + Gatekeeper + Kyverno
-pip install -e ".[azure]"       # + Azure Policy
-pip install -e ".[all]"         # everything
-```
-
-**From PyPI (coming in v0.2):**
-
-```bash
-pip install policy-pulse-mcp
-pip install "policy-pulse-mcp[kubernetes]"
-pip install "policy-pulse-mcp[azure]"
-pip install "policy-pulse-mcp[all]"
+pip install -e ".[all]"
 ```
 
 ---
