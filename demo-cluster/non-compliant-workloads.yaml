@@ -1,0 +1,59 @@
+---
+# Intentionally violates: no-privileged-containers
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bad-deployment
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bad-deployment
+  template:
+    metadata:
+      labels:
+        app: bad-deployment
+    spec:
+      containers:
+        - name: app
+          image: nginx:latest
+          securityContext:
+            privileged: true         # VIOLATION: no-privileged-containers
+---
+# Intentionally violates: no-host-network, run-as-non-root
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bad-pod
+  namespace: default
+spec:
+  hostNetwork: true                  # VIOLATION: no-host-network
+  containers:
+    - name: app
+      image: nginx:latest
+      # no securityContext.runAsNonRoot  → VIOLATION: run-as-non-root
+      # no resources.limits             → VIOLATION: resource-limits-required
+      # no livenessProbe                → VIOLATION: liveness-probe-required
+      # no readinessProbe               → VIOLATION: readiness-probe-required
+---
+# Intentionally violates: no-host-pid, no-host-ipc
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: old-daemonset
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: old-daemonset
+  template:
+    metadata:
+      labels:
+        app: old-daemonset
+    spec:
+      hostPID: true                  # VIOLATION: no-host-pid
+      hostIPC: true                  # VIOLATION: no-host-ipc
+      containers:
+        - name: agent
+          image: busybox:latest
