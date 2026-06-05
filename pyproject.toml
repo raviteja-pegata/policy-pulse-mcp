@@ -47,9 +47,9 @@ dev = [
 policy-pulse-mcp = "policy_pulse_mcp.server:main"
 
 [project.urls]
-Homepage = "https://github.com/lumiodigital/policy-pulse-mcp"
-Repository = "https://github.com/lumiodigital/policy-pulse-mcp"
-Issues = "https://github.com/lumiodigital/policy-pulse-mcp/issues"
+Homepage = "https://github.com/raviteja-pegata/policy-pulse-mcp"
+Repository = "https://github.com/raviteja-pegata/policy-pulse-mcp"
+Issues = "https://github.com/raviteja-pegata/policy-pulse-mcp/issues"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

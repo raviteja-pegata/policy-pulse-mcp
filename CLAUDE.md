@@ -6,7 +6,7 @@ PolicyPulse MCP is an open-source Python MCP (Model Context Protocol) server tha
 unifies OPA/Gatekeeper, Kyverno, and Azure Policy behind one compliance-aware
 interface. It is the **first MCP server** to combine all three engines.
 
-Built by Ravi Pegata (LUMIO LLC) — Principal Cloud Platform & AI Platform Engineer.
+Built by Ravi Pegata — Principal Cloud Platform & AI Platform Engineer.
 
 ---
 
@@ -292,7 +292,7 @@ git add .
 git commit -m "feat: initial release v0.1.0"
 
 # Create repo at github.com/lumiodigital/policy-pulse-mcp first, then:
-git remote add origin https://github.com/lumiodigital/policy-pulse-mcp.git
+git remote add origin https://github.com/raviteja-pegata/policy-pulse-mcp.git
 git branch -M main
 git push -u origin main
 ```

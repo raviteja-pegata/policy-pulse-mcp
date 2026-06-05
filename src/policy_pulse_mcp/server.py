@@ -315,7 +315,13 @@ async def list_controls() -> dict:
 
 
 def main() -> None:
-    mcp.run()
+    transport = os.environ.get("POLICYPULSE_TRANSPORT", "stdio").lower()
+    if transport == "sse":
+        host = os.environ.get("POLICYPULSE_HOST", "0.0.0.0")
+        port = int(os.environ.get("PORT", os.environ.get("POLICYPULSE_PORT", "8000")))
+        mcp.run(transport="sse", host=host, port=port)
+    else:
+        mcp.run()
 
 
 if __name__ == "__main__":
