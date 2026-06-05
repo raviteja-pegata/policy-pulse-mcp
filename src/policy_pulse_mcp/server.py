@@ -141,7 +141,14 @@ async def cluster_status() -> dict:
     clusters = _parse_clusters()
     fleet = None
     if clusters:
-        fleet = [{"label": label, "context": context} for label, context in clusters]
+        fleet = [
+            {
+                "label": label,
+                "context": context,
+                "auth": "workload_identity" if ("/" in context and not context.startswith("http")) else "kubeconfig",
+            }
+            for label, context in clusters
+        ]
 
     return {
         "demo_mode": DEMO_MODE,

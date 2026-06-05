@@ -69,7 +69,7 @@ The control catalog is the single source of truth — it powers both **runtime e
 
 | Tool | What it does |
 |---|---|
-| `cluster_status` | Which engines are connected; fleet overview; credential type |
+| `cluster_status` | Which engines are connected; fleet overview with auth mode per cluster; credential type |
 | `list_policies` | All policies across engines; filter by engine |
 | `get_violations` | All violations enriched with framework refs; filter by namespace / engine / severity / cluster |
 | `get_compliance_risk_summary` | Cross-engine risk summary with regulatory impact |
@@ -126,21 +126,52 @@ AZURE_CREDENTIAL_TYPE=cli \
 policy-pulse-mcp
 ```
 
-### Multi-cluster fleet
+---
+
+## Multi-Cluster Fleet
+
+PolicyPulse can query multiple clusters in a single session. Every violation includes a `cluster` field so you can filter by cluster when querying.
+
+There are two ways to specify clusters depending on where you're hosting PolicyPulse:
+
+| Mode | Context format | When to use |
+|---|---|---|
+| **Kubeconfig** | `label:context-name` | Local dev, or kubeconfig mounted into the pod |
+| **Workload Identity** | `label:resourceGroup/clusterName` | Hosted on Container Apps or AKS — no kubeconfig file needed |
+
+### Kubeconfig mode (local development)
+
+Pull credentials for each cluster, then point PolicyPulse at multiple contexts in a single kubeconfig:
 
 ```bash
-POLICYPULSE_CLUSTERS=prod:aks-prod-eastus,staging:aks-staging-westus,dev:aks-dev \
+az aks get-credentials --resource-group rg-prod --name aks-prod
+az aks get-credentials --resource-group rg-staging --name aks-staging
+
+POLICYPULSE_CLUSTERS=prod:aks-prod,staging:aks-staging \
 AZURE_SUBSCRIPTION_ID=<sub-id> \
 policy-pulse-mcp
 ```
 
-Each violation includes a `cluster` field. You can filter by cluster when querying.
+The context name (`aks-prod`, `aks-staging`) must match a context in your `~/.kube/config`.
+
+### Workload Identity mode (hosted deployments)
+
+Use the `resourceGroup/clusterName` format. PolicyPulse calls the Azure management API to fetch each cluster's API server URL and CA certificate, then authenticates using a managed identity token — no kubeconfig file is needed anywhere.
+
+```bash
+POLICYPULSE_CLUSTERS=prod:rg-prod/aks-prod,staging:rg-staging/aks-staging \
+AZURE_SUBSCRIPTION_ID=<sub-id> \
+AZURE_CREDENTIAL_TYPE=managed_identity \
+policy-pulse-mcp
+```
+
+Full setup for this is in the [Workload Identity Setup](#workload-identity-setup) section below.
 
 ---
 
 ## Hosting on Azure Container Apps
 
-For enterprise deployments, run PolicyPulse as an SSE server. This lets multiple teams and tools connect to one centrally managed compliance server.
+For enterprise deployments, run PolicyPulse as an SSE server on Azure Container Apps. This lets multiple teams and tools connect to one centrally managed compliance server over HTTPS.
 
 ### stdio vs SSE
 
@@ -176,13 +207,14 @@ az containerapp create \
     POLICYPULSE_TRANSPORT=sse \
     AZURE_SUBSCRIPTION_ID=<sub-id> \
     AZURE_CREDENTIAL_TYPE=managed_identity \
-    POLICYPULSE_CLUSTERS=prod:aks-prod,staging:aks-staging
+    POLICYPULSE_CLUSTERS=prod:rg-prod/aks-prod,staging:rg-staging/aks-staging
 ```
 
-### Step 3 — Assign managed identity
+> Using `resourceGroup/clusterName` format for `POLICYPULSE_CLUSTERS` activates Workload Identity mode — no kubeconfig file is needed in the container.
+
+### Step 3 — Assign a managed identity
 
 ```bash
-# Enable system-assigned managed identity
 az containerapp identity assign \
   --name policy-pulse-mcp \
   --resource-group <your-rg> \
@@ -192,18 +224,17 @@ PRINCIPAL_ID=$(az containerapp identity show \
   --name policy-pulse-mcp \
   --resource-group <your-rg> \
   --query principalId -o tsv)
-
-# Grant Policy Insights Reader on your subscription
-az role assignment create \
-  --assignee $PRINCIPAL_ID \
-  --role "Policy Insights Data Reader (Preview)" \
-  --scope /subscriptions/<sub-id>
 ```
 
-### Step 4 — Connect AKS to the Container App
+Then follow the [Workload Identity Setup](#workload-identity-setup) section to grant the identity access to each AKS cluster.
+
+### Step 4 — Network connectivity
+
+PolicyPulse needs to reach each AKS API server from Container Apps:
 
 ```bash
 # Option A: VNet integration (recommended for production)
+# Create the Container Apps environment on the same VNet as your AKS clusters.
 az containerapp env create \
   --name policy-pulse-env \
   --resource-group <your-rg> \
@@ -217,8 +248,8 @@ ACA_IP=$(az containerapp show \
   --query properties.outboundIpAddresses[0] -o tsv)
 
 az aks update \
-  --name <cluster> \
-  --resource-group <your-rg> \
+  --name aks-prod \
+  --resource-group rg-prod \
   --api-server-authorized-ip-ranges $ACA_IP
 ```
 
@@ -226,6 +257,162 @@ Your SSE endpoint will be:
 ```
 https://policy-pulse-mcp.<unique-id>.eastus.azurecontainerapps.io/sse
 ```
+
+---
+
+## Workload Identity Setup
+
+This section covers everything needed for the `resourceGroup/clusterName` cluster format — the recommended approach for Container Apps and AKS-hosted deployments.
+
+### How it works
+
+When PolicyPulse sees `POLICYPULSE_CLUSTERS=prod:rg-prod/aks-prod`, it:
+
+1. Calls the Azure management API with a management-plane token to fetch the cluster's API server URL and CA certificate.
+2. Gets a second token scoped to the AKS AAD server application (audience `6dae42f8-4368-4678-94ff-3960e28e3630`).
+3. Builds the Kubernetes client from those two pieces — no kubeconfig file anywhere.
+
+```
+PolicyPulse (Container App or AKS pod)
+        │
+        │  managed identity token
+        ▼
+Azure AD
+        │
+        ├──► management.azure.com  →  listClusterUserCredential
+        │                             (gets API server URL + CA cert)
+        │
+        └──► AKS API server (each cluster)
+             "I am identity X — is my token valid?"
+             "Yes — you have view access — here are your violations"
+```
+
+### Prerequisites
+
+- Each target AKS cluster must have **AAD integration enabled**. This is the default for clusters created from 2021 onwards. To verify:
+
+  ```bash
+  az aks show --resource-group rg-prod --name aks-prod \
+    --query "aadProfile" -o json
+  # Should return a non-null object
+  ```
+
+- The managed identity needs permissions at **two levels**: the Azure management plane (to fetch cluster credentials) and inside each Kubernetes cluster (to read policy resources).
+
+### Step 1 — Grant management-plane permissions
+
+The identity needs to be able to call `listClusterUserCredential` on each target cluster, and to read Azure Policy compliance state.
+
+```bash
+PRINCIPAL_ID=<principal-id-of-your-managed-identity>
+SUB_ID=<your-subscription-id>
+
+# Azure Policy — read compliance state across the subscription
+az role assignment create \
+  --assignee $PRINCIPAL_ID \
+  --role "Policy Insights Data Reader (Preview)" \
+  --scope /subscriptions/$SUB_ID
+
+# AKS — fetch cluster credentials (repeat for each target cluster)
+az role assignment create \
+  --assignee $PRINCIPAL_ID \
+  --role "Azure Kubernetes Service Cluster User Role" \
+  --scope /subscriptions/$SUB_ID/resourceGroups/rg-prod/providers/Microsoft.ContainerService/managedClusters/aks-prod
+
+az role assignment create \
+  --assignee $PRINCIPAL_ID \
+  --role "Azure Kubernetes Service Cluster User Role" \
+  --scope /subscriptions/$SUB_ID/resourceGroups/rg-staging/providers/Microsoft.ContainerService/managedClusters/aks-staging
+```
+
+### Step 2 — Grant Kubernetes RBAC on each cluster
+
+Once the management-plane token gets PolicyPulse into the API server, Kubernetes still checks its own RBAC. The approach depends on whether your cluster uses **Azure RBAC** or **local RBAC**.
+
+**Check which mode your cluster uses:**
+```bash
+az aks show --resource-group rg-prod --name aks-prod \
+  --query "aadProfile.enableAzureRbac" -o tsv
+# true = Azure RBAC mode, false/null = local RBAC mode
+```
+
+**Azure RBAC mode (recommended for new clusters):**
+
+Azure RBAC roles map directly to Kubernetes RBAC — no `kubectl` commands needed inside the cluster.
+
+```bash
+# Grant read access to Gatekeeper and Kyverno resources (repeat per cluster)
+az role assignment create \
+  --assignee $PRINCIPAL_ID \
+  --role "Azure Kubernetes Service RBAC Reader" \
+  --scope /subscriptions/$SUB_ID/resourceGroups/rg-prod/providers/Microsoft.ContainerService/managedClusters/aks-prod
+
+az role assignment create \
+  --assignee $PRINCIPAL_ID \
+  --role "Azure Kubernetes Service RBAC Reader" \
+  --scope /subscriptions/$SUB_ID/resourceGroups/rg-staging/providers/Microsoft.ContainerService/managedClusters/aks-staging
+```
+
+**Local RBAC mode (older clusters):**
+
+You need to create a `ClusterRoleBinding` inside each cluster using the identity's **client ID** (not the principal/object ID).
+
+```bash
+# Get the client ID of the managed identity
+CLIENT_ID=$(az identity show \
+  --name <your-managed-identity-name> \
+  --resource-group <your-rg> \
+  --query clientId -o tsv)
+
+# Run this for each target cluster
+az aks get-credentials --resource-group rg-prod --name aks-prod
+
+kubectl create clusterrolebinding policypulse-reader \
+  --clusterrole=view \
+  --user="$CLIENT_ID"
+```
+
+> The `view` ClusterRole gives read-only access to most resources including the custom resources that Gatekeeper and Kyverno write their violations to.
+
+### Step 3 — Configure PolicyPulse
+
+Set these environment variables on your Container App or pod:
+
+```
+AZURE_SUBSCRIPTION_ID    = <your-subscription-id>
+AZURE_CREDENTIAL_TYPE    = managed_identity
+POLICYPULSE_CLUSTERS     = prod:rg-prod/aks-prod,staging:rg-staging/aks-staging
+```
+
+For a user-assigned managed identity, also set:
+```
+AZURE_CLIENT_ID          = <client-id-of-the-user-assigned-identity>
+```
+
+### Step 4 — Verify the connection
+
+Once the server is running, call `cluster_status`. The response shows the auth mode for each cluster:
+
+```json
+{
+  "fleet": [
+    { "label": "prod",    "context": "rg-prod/aks-prod",       "auth": "workload_identity" },
+    { "label": "staging", "context": "rg-staging/aks-staging", "auth": "workload_identity" }
+  ]
+}
+```
+
+If `"auth"` shows `"workload_identity"` and the cluster appears in `connected_engines`, the setup is complete.
+
+### Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `AZURE_SUBSCRIPTION_ID must be set` | Missing env var | Set `AZURE_SUBSCRIPTION_ID` |
+| `403` from management API | Missing `Cluster User Role` | Run Step 1 role assignments |
+| `401 Unauthorized` from k8s API | Missing k8s RBAC | Run Step 2 for the cluster |
+| `aadProfile is null` | AAD integration not enabled | Enable with `az aks update --enable-aad` |
+| `No CA certificate found` | Kubeconfig returned no CA | Check cluster health; fallback uses unverified TLS |
 
 ---
 
@@ -380,28 +567,28 @@ Cline extension → **MCP Servers → Add**:
 
 | Variable | Default | Description |
 |---|---|---|
-| `POLICYPULSE_DEMO` | `false` | `true` = mock data, no cluster or Azure needed |
+| `POLICYPULSE_DEMO` | `false` | `true` = mock data, no cluster or Azure credentials needed |
 | `POLICYPULSE_TRANSPORT` | `stdio` | `stdio` for local clients, `sse` for hosted deployments |
 | `POLICYPULSE_HOST` | `0.0.0.0` | SSE server bind address |
 | `PORT` | `8000` | SSE server port (also accepts `POLICYPULSE_PORT`) |
-| `POLICYPULSE_LOG` | `INFO` | Log level |
+| `POLICYPULSE_LOG` | `INFO` | Log level (`DEBUG`, `INFO`, `WARNING`) |
 
 ### Kubernetes
 
 | Variable | Default | Description |
 |---|---|---|
-| `KUBECONFIG` | `~/.kube/config` | Path to kubeconfig file |
-| `POLICYPULSE_CLUSTERS` | *(single cluster)* | Multi-cluster: `label1:context1,label2:context2` |
+| `KUBECONFIG` | `~/.kube/config` | Path to kubeconfig file (used in kubeconfig mode only) |
+| `POLICYPULSE_CLUSTERS` | *(single cluster)* | Comma-separated list. Two formats supported: `label:context-name` (kubeconfig mode) or `label:resourceGroup/clusterName` (workload identity mode). Example: `prod:rg-prod/aks-prod,dev:aks-dev-context` |
 
 ### Azure
 
 | Variable | Required | Description |
 |---|---|---|
-| `AZURE_SUBSCRIPTION_ID` | For Azure engine | Subscription to query |
-| `AZURE_CREDENTIAL_TYPE` | No | `auto` \| `cli` \| `managed_identity` \| `service_principal` |
-| `AZURE_TENANT_ID` | For service_principal | Azure AD tenant ID |
-| `AZURE_CLIENT_ID` | For service_principal / user-assigned MI | Client or identity ID |
-| `AZURE_CLIENT_SECRET` | For service_principal | Client secret |
+| `AZURE_SUBSCRIPTION_ID` | For Azure Policy and workload identity | Subscription to query for policy compliance |
+| `AZURE_CREDENTIAL_TYPE` | No (default: `auto`) | `auto` \| `cli` \| `managed_identity` \| `service_principal` |
+| `AZURE_TENANT_ID` | For `service_principal` | Azure AD tenant ID |
+| `AZURE_CLIENT_ID` | For `service_principal` or user-assigned MI | Client or identity ID |
+| `AZURE_CLIENT_SECRET` | For `service_principal` | Client secret |
 
 ---
 
@@ -422,22 +609,45 @@ AZURE_CLIENT_SECRET=<secret> \
 policy-pulse-mcp
 ```
 
-**Production on AKS / Container Apps — managed identity:**
+**Production on Container Apps / AKS — managed identity:**
 ```bash
 AZURE_CREDENTIAL_TYPE=managed_identity policy-pulse-mcp
 ```
 
-The identity needs **Policy Insights Data Reader (Preview)** on your subscription.
+Required Azure roles for the managed identity:
+
+| Role | Scope | Purpose |
+|---|---|---|
+| `Policy Insights Data Reader (Preview)` | Subscription | Read Azure Policy compliance state |
+| `Azure Kubernetes Service Cluster User Role` | Each AKS cluster | Fetch cluster credentials via management API |
+| `Azure Kubernetes Service RBAC Reader` | Each AKS cluster | Read Gatekeeper/Kyverno resources (Azure RBAC clusters) |
+
+For clusters using local RBAC instead of Azure RBAC, see [Step 2 of Workload Identity Setup](#step-2--grant-kubernetes-rbac-on-each-cluster).
 
 ---
 
 ## Installation
 
+**From source (current):**
+
 ```bash
-pip install policy-pulse-mcp                    # core only (demo + static gate)
-pip install "policy-pulse-mcp[kubernetes]"      # + Gatekeeper + Kyverno
-pip install "policy-pulse-mcp[azure]"           # + Azure Policy
-pip install "policy-pulse-mcp[all]"             # everything
+git clone https://github.com/raviteja-pegata/policy-pulse-mcp
+cd policy-pulse-mcp
+python -m venv .venv && source .venv/bin/activate
+
+pip install -e "."          # core only (demo + static gate)
+pip install -e ".[kubernetes]"  # + Gatekeeper + Kyverno
+pip install -e ".[azure]"       # + Azure Policy
+pip install -e ".[all]"         # everything
+```
+
+**From PyPI (coming in v0.2):**
+
+```bash
+pip install policy-pulse-mcp
+pip install "policy-pulse-mcp[kubernetes]"
+pip install "policy-pulse-mcp[azure]"
+pip install "policy-pulse-mcp[all]"
 ```
 
 ---

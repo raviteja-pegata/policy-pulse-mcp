@@ -1,4 +1,3 @@
-import pytest
 
 from policy_pulse_mcp.server import (
     check_manifest_compliance,

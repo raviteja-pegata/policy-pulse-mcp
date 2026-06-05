@@ -8,7 +8,7 @@ from typing import Union
 import yaml
 
 from .frameworks import CATALOG
-from .models import Engine, Severity, Violation
+from .models import Engine, Violation
 
 
 def _extract_pod_spec(manifest: dict) -> dict | None:

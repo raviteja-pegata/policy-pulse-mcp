@@ -1,4 +1,3 @@
-import pytest
 
 from policy_pulse_mcp import checks
 from policy_pulse_mcp.evaluator import gate
