@@ -1,0 +1,51 @@
+{
+  "$schema": "https://schema.modelcontextprotocol.io/server/v0",
+  "name": "io.github.raviteja-pegata/policy-pulse-mcp",
+  "title": "PolicyPulse MCP",
+  "description": "Unified OPA/Gatekeeper, Kyverno, and Azure Policy MCP server. Query your Kubernetes compliance posture across multiple clusters in plain English — violations enriched with CIS, PCI-DSS, NIST 800-53, and SOC 2 references.",
+  "version": "0.1.0",
+  "websiteUrl": "https://github.com/raviteja-pegata/policy-pulse-mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/raviteja-pegata/policy-pulse-mcp"
+  },
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "policy-pulse-mcp",
+      "version": "0.1.0",
+      "installCommand": "pip install \"policy-pulse-mcp[all]\"",
+      "runCommand": "policy-pulse-mcp"
+    }
+  ],
+  "tools": [
+    {
+      "name": "cluster_status",
+      "description": "Which policy engines are connected, fleet overview, and credential type"
+    },
+    {
+      "name": "list_policies",
+      "description": "All policies across connected engines, filterable by engine"
+    },
+    {
+      "name": "get_violations",
+      "description": "Active violations enriched with compliance framework refs, filterable by namespace, engine, severity, or cluster"
+    },
+    {
+      "name": "get_compliance_risk_summary",
+      "description": "Cross-engine risk summary with severity breakdown and regulatory impact"
+    },
+    {
+      "name": "explain_violation",
+      "description": "Plain English explanation of one violation with framework mapping and remediation steps"
+    },
+    {
+      "name": "check_manifest_compliance",
+      "description": "Static pre-deploy gate — checks a Kubernetes YAML manifest for policy violations, no cluster needed"
+    },
+    {
+      "name": "list_controls",
+      "description": "Full compliance control catalog with CIS, PCI-DSS, NIST 800-53, and SOC 2 mappings"
+    }
+  ]
+}
